@@ -22,6 +22,7 @@
             border: 1px solid #ddd;
             margin-bottom: 10px;
             padding: 10px;
+            transition: background-color 0.3s ease;
         }
         .event.seen {
             opacity: 0.5;
@@ -41,7 +42,7 @@
         .seen-toggle {
             margin-bottom: 10px;
         }
-        #pauseButton {
+        #pauseButton, #liftwingButton {
             margin-bottom: 10px;
             padding: 5px 10px;
             background-color: #4CAF50;
@@ -61,53 +62,66 @@
             font-weight: bold;
             color: #4CAF50;
         }
+        .damaging-score {
+            font-weight: bold;
+            margin-top: 5px;
+        }
+        .risk-low {
+            background-color: #e6ffe6;
+        }
+        .risk-medium {
+            background-color: #fff0e6;
+        }
+        .risk-high {
+            background-color: #ffe6e6;
+        }
     </style>
 </head>
 <body>
     <h1>Wikimedia Event Stream Monitor</h1>
     <div id="filters">
-        <label>
+        <label for="domainFilter">
             Domain:
-            <input type="text" id="domainFilter" placeholder="e.g., en.wikipedia.org">
+            <input type="text" id="domainFilter" name="domainFilter" placeholder="e.g., en.wikipedia.org">
         </label>
-        <label>
+        <label for="namespaceFilter">
             Namespace:
-            <input type="number" id="namespaceFilter" placeholder="e.g., 0 for main">
+            <input type="number" id="namespaceFilter" name="namespaceFilter" placeholder="e.g., 0 for main">
         </label>
-        <label>
-            <input type="checkbox" id="minorFilter"> Minor edits only
+        <label for="minorFilter">
+            <input type="checkbox" id="minorFilter" name="minorFilter"> Minor edits only
         </label>
-        <label>
-            <input type="checkbox" id="botFilter"> Bot edits only
+        <label for="botFilter">
+            <input type="checkbox" id="botFilter" name="botFilter"> Bot edits only
         </label>
-        <label>
-            <input type="checkbox" id="anonymousFilter"> Anonymous edits only
+        <label for="anonymousFilter">
+            <input type="checkbox" id="anonymousFilter" name="anonymousFilter"> Anonymous edits only
         </label>
-        <label>
+        <label for="titleRegexFilter">
             Title regex:
-            <input type="text" id="titleRegexFilter" placeholder="e.g., ^User:">
+            <input type="text" id="titleRegexFilter" name="titleRegexFilter" placeholder="e.g., ^User:">
         </label>
         <button id="applyFilters">Apply Filters</button>
         <button id="clearFilters">Clear Filters</button>
     </div>
     <div class="seen-toggle">
-        <label>
-            <input type="checkbox" id="hideSeenToggle"> Hide seen entries
+        <label for="hideSeenToggle">
+            <input type="checkbox" id="hideSeenToggle" name="hideSeenToggle"> Hide seen entries
         </label>
     </div>
     <button id="pauseButton">Pause</button>
+    <button id="liftwingButton">Apply Liftwing API</button>
     <ul id="eventList"></ul>
 
     <script>
-        const MAX_EVENTS = 250; // Maximum number of events to store
-        const DISPLAY_EVENTS = 50; // Number of events to display
+        const MAX_EVENTS = 250;
+        const DISPLAY_EVENTS = 50;
 
         let eventBuffer = [];
         let currentIndex = 0;
         const eventList = document.getElementById('eventList');
         const eventSource = new EventSource('https://stream.wikimedia.org/v2/stream/recentchange');
 
-        // Filter elements
         const domainFilter = document.getElementById('domainFilter');
         const namespaceFilter = document.getElementById('namespaceFilter');
         const minorFilter = document.getElementById('minorFilter');
@@ -118,6 +132,7 @@
         const clearFiltersButton = document.getElementById('clearFilters');
         const hideSeenToggle = document.getElementById('hideSeenToggle');
         const pauseButton = document.getElementById('pauseButton');
+        const liftwingButton = document.getElementById('liftwingButton');
 
         let isPaused = false;
         let activeFilters = {};
@@ -139,7 +154,7 @@
         };
 
         function addEvent(event) {
-            event.seen = false; // Add 'seen' property to each event
+            event.seen = false;
             if (eventBuffer.length < MAX_EVENTS) {
                 eventBuffer.push(event);
             } else {
@@ -238,7 +253,6 @@
 
             li.appendChild(details);
 
-            // Add "Seen" checkbox
             const seenLabel = document.createElement('label');
             const seenCheckbox = document.createElement('input');
             seenCheckbox.type = 'checkbox';
@@ -291,11 +305,60 @@
             pauseButton.textContent = isPaused ? 'Resume' : 'Pause';
             pauseButton.classList.toggle('paused', isPaused);
             if (!isPaused) {
-                applyFilters(); // Update the display when resuming
+                applyFilters();
             }
         });
 
-        // Initial application of filters
+        liftwingButton.addEventListener('click', applyLiftwingAPI);
+
+        async function applyLiftwingAPI() {
+            const events = Array.from(document.querySelectorAll('#eventList .event'));
+            for (const eventElement of events) {
+                const revisionElement = eventElement.querySelector('.event-details span:nth-child(24)');
+                if (revisionElement) {
+                    const revisionNew = revisionElement.textContent;
+                    if (revisionNew && revisionNew !== 'N/A') {
+                        try {
+                            const response = await fetch('/liftwing', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                },
+                                body: JSON.stringify({ rev_id: revisionNew }),
+                            });
+                            if (!response.ok) {
+                                throw new Error(`HTTP error! status: ${response.status}`);
+                            }
+                            const data = await response.json();
+                            const scores = data.enwiki.scores;
+                            const revId = Object.keys(scores)[0];
+                            const damagingScore = scores[revId].damaging.score.probability.true;
+                            
+                            const scoreElement = document.createElement('div');
+                            scoreElement.className = 'damaging-score';
+                            scoreElement.textContent = `Damaging Score: ${(damagingScore * 100).toFixed(2)}%`;
+                            eventElement.appendChild(scoreElement);
+
+                            // Color-code the event based on the risk level
+                            if (damagingScore < 0.3) {
+                                eventElement.classList.add('risk-low');
+                            } else if (damagingScore < 0.7) {
+                                eventElement.classList.add('risk-medium');
+                            } else {
+                                eventElement.classList.add('risk-high');
+                            }
+                        } catch (error) {
+                            console.error('Error fetching Liftwing API:', error);
+                            const errorElement = document.createElement('div');
+                            errorElement.className = 'error-message';
+                            errorElement.textContent = `Error: ${error.message}`;
+                            eventElement.appendChild(errorElement);
+                        }
+                    }
+                }
+            }
+        }
+
         applyFilters();
     </script>
 </body>
