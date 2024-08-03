@@ -42,7 +42,7 @@
         .seen-toggle {
             margin-bottom: 10px;
         }
-        #pauseButton, #liftwingButton {
+        #pauseButton, .liftwingButton {
             margin-bottom: 10px;
             padding: 5px 10px;
             background-color: #4CAF50;
@@ -110,7 +110,6 @@
         </label>
     </div>
     <button id="pauseButton">Pause</button>
-    <button id="liftwingButton">Apply Liftwing API</button>
     <ul id="eventList"></ul>
 
     <script>
@@ -132,7 +131,6 @@
         const clearFiltersButton = document.getElementById('clearFilters');
         const hideSeenToggle = document.getElementById('hideSeenToggle');
         const pauseButton = document.getElementById('pauseButton');
-        const liftwingButton = document.getElementById('liftwingButton');
 
         let isPaused = false;
         let activeFilters = {};
@@ -268,6 +266,12 @@
             seenLabel.appendChild(document.createTextNode(' Mark as seen'));
             li.appendChild(seenLabel);
 
+            const liftwingButton = document.createElement('button');
+            liftwingButton.className = 'liftwingButton';
+            liftwingButton.textContent = 'Apply Liftwing API';
+            liftwingButton.addEventListener('click', () => applyLiftwingAPI(li, event.revision?.new));
+            li.appendChild(liftwingButton);
+
             eventList.appendChild(li);
         }
 
@@ -309,52 +313,49 @@
             }
         });
 
-        liftwingButton.addEventListener('click', applyLiftwingAPI);
-
-        async function applyLiftwingAPI() {
-            const events = Array.from(document.querySelectorAll('#eventList .event'));
-            for (const eventElement of events) {
-                const revisionElement = eventElement.querySelector('.event-details span:nth-child(24)');
-                if (revisionElement) {
-                    const revisionNew = revisionElement.textContent;
-                    if (revisionNew && revisionNew !== 'N/A') {
-                        try {
-                            const response = await fetch('/liftwing', {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                },
-                                body: JSON.stringify({ rev_id: revisionNew }),
-                            });
-                            if (!response.ok) {
-                                throw new Error(`HTTP error! status: ${response.status}`);
-                            }
-                            const data = await response.json();
-                            const scores = data.enwiki.scores;
-                            const revId = Object.keys(scores)[0];
-                            const damagingScore = scores[revId].damaging.score.probability.true;
-                            
-                            const scoreElement = document.createElement('div');
-                            scoreElement.className = 'damaging-score';
-                            scoreElement.textContent = `Damaging Score: ${(damagingScore * 100).toFixed(2)}%`;
-                            eventElement.appendChild(scoreElement);
-
-                            // Color-code the event based on the risk level
-                            if (damagingScore < 0.3) {
-                                eventElement.classList.add('risk-low');
-                            } else if (damagingScore < 0.7) {
-                                eventElement.classList.add('risk-medium');
-                            } else {
-                                eventElement.classList.add('risk-high');
-                            }
-                        } catch (error) {
-                            console.error('Error fetching Liftwing API:', error);
-                            const errorElement = document.createElement('div');
-                            errorElement.className = 'error-message';
-                            errorElement.textContent = `Error: ${error.message}`;
-                            eventElement.appendChild(errorElement);
-                        }
+        async function applyLiftwingAPI(eventElement, revisionNew) {
+            if (revisionNew && revisionNew !== 'N/A') {
+                try {
+                    const response = await fetch('/liftwing', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ rev_id: revisionNew }),
+                    });
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
                     }
+                    const data = await response.json();
+                    const scores = data.enwiki.scores;
+                    const revId = Object.keys(scores)[0];
+                    const damagingScore = scores[revId].damaging.score.probability.true;
+                    
+                    const scoreElement = document.createElement('div');
+                    scoreElement.className = 'damaging-score';
+                    scoreElement.textContent = `Damaging Score: ${(damagingScore * 100).toFixed(2)}%`;
+                    eventElement.appendChild(scoreElement);
+
+                    // Color-code the event based on the risk level
+                    if (damagingScore < 0.3) {
+                        eventElement.classList.add('risk-low');
+                    } else if (damagingScore < 0.7) {
+                        eventElement.classList.add('risk-medium');
+                    } else {
+                        eventElement.classList.add('risk-high');
+                    }
+
+                    // Remove the Liftwing button after successful API call
+                    const liftwingButton = eventElement.querySelector('.liftwingButton');
+                    if (liftwingButton) {
+                        liftwingButton.remove();
+                    }
+                } catch (error) {
+                    console.error('Error fetching Liftwing API:', error);
+                    const errorElement = document.createElement('div');
+                    errorElement.className = 'error-message';
+                    errorElement.textContent = `Error: ${error.message}`;
+                    eventElement.appendChild(errorElement);
                 }
             }
         }
