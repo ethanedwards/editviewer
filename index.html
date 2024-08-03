@@ -52,6 +52,15 @@
         #pauseButton.paused {
             background-color: #f44336;
         }
+        .clickable {
+            cursor: pointer;
+            color: blue;
+            text-decoration: underline;
+        }
+        .active-filter {
+            font-weight: bold;
+            color: #4CAF50;
+        }
     </style>
 </head>
 <body>
@@ -79,6 +88,7 @@
             <input type="text" id="titleRegexFilter" placeholder="e.g., ^User:">
         </label>
         <button id="applyFilters">Apply Filters</button>
+        <button id="clearFilters">Clear Filters</button>
     </div>
     <div class="seen-toggle">
         <label>
@@ -89,7 +99,7 @@
     <ul id="eventList"></ul>
 
     <script>
-        const MAX_EVENTS = 1000; // Maximum number of events to store
+        const MAX_EVENTS = 250; // Maximum number of events to store
         const DISPLAY_EVENTS = 50; // Number of events to display
 
         let eventBuffer = [];
@@ -105,10 +115,12 @@
         const anonymousFilter = document.getElementById('anonymousFilter');
         const titleRegexFilter = document.getElementById('titleRegexFilter');
         const applyFiltersButton = document.getElementById('applyFilters');
+        const clearFiltersButton = document.getElementById('clearFilters');
         const hideSeenToggle = document.getElementById('hideSeenToggle');
         const pauseButton = document.getElementById('pauseButton');
 
         let isPaused = false;
+        let activeFilters = {};
 
         eventSource.onmessage = function(event) {
             try {
@@ -152,6 +164,9 @@
                 if (bot && !event.bot) return false;
                 if (anonymous && event.user_is_anon !== undefined && !event.user_is_anon) return false;
                 if (titleRegex && !titleRegex.test(event.title)) return false;
+                if (activeFilters.user && event.user !== activeFilters.user) return false;
+                if (activeFilters.server && event.server_name !== activeFilters.server) return false;
+                if (activeFilters.type && event.type !== activeFilters.type) return false;
                 return true;
             });
 
@@ -183,9 +198,9 @@
             details.className = 'event-details';
             
             const fields = [
-                { label: 'Type', value: event.type },
+                { label: 'Type', value: event.type, clickable: true },
                 { label: 'Title', value: `<a href="${event.meta.uri}" target="_blank">${event.title}</a>` },
-                { label: 'User', value: event.user },
+                { label: 'User', value: event.user, clickable: true },
                 { label: 'Comment', value: event.comment },
                 { label: 'Timestamp', value: new Date(event.meta.dt).toLocaleString() },
                 { label: 'Bot', value: event.bot ? 'Yes' : 'No' },
@@ -195,7 +210,7 @@
                 { label: 'New Length', value: event.length?.new },
                 { label: 'Old Revision', value: event.revision?.old },
                 { label: 'New Revision', value: event.revision?.new },
-                { label: 'Server', value: event.server_name },
+                { label: 'Server', value: event.server_name, clickable: true },
                 { label: 'Namespace', value: event.namespace },
                 { label: 'Parsed Comment', value: event.parsedcomment },
                 { label: 'Diff', value: `<a href="${event.meta.uri}" target="_blank">View Changes</a>` }
@@ -208,6 +223,15 @@
                 details.appendChild(label);
 
                 const value = document.createElement('span');
+                if (field.clickable) {
+                    value.className = 'clickable';
+                    if (activeFilters[field.label.toLowerCase()] === field.value) {
+                        value.classList.add('active-filter');
+                    }
+                    value.addEventListener('click', () => {
+                        toggleFilter(field.label.toLowerCase(), field.value);
+                    });
+                }
                 value.innerHTML = field.value !== undefined ? field.value : 'N/A';
                 details.appendChild(value);
             });
@@ -233,7 +257,26 @@
             eventList.appendChild(li);
         }
 
+        function toggleFilter(field, value) {
+            if (activeFilters[field] === value) {
+                delete activeFilters[field];
+            } else {
+                activeFilters[field] = value;
+            }
+            applyFilters();
+        }
+
         applyFiltersButton.addEventListener('click', applyFilters);
+        clearFiltersButton.addEventListener('click', () => {
+            activeFilters = {};
+            domainFilter.value = '';
+            namespaceFilter.value = '';
+            minorFilter.checked = false;
+            botFilter.checked = false;
+            anonymousFilter.checked = false;
+            titleRegexFilter.value = '';
+            applyFilters();
+        });
         hideSeenToggle.addEventListener('change', () => {
             const hideSeen = hideSeenToggle.checked;
             document.querySelectorAll('#eventList .event').forEach(li => {
