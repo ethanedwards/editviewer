@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wikimedia Event Stream Monitor</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+        #filters {
+            margin-bottom: 20px;
+        }
+        #eventList {
+            list-style-type: none;
+            padding: 0;
+        }
+        .event {
+            background-color: #f0f0f0;
+            border: 1px solid #ddd;
+            margin-bottom: 10px;
+            padding: 10px;
+        }
+        .event.seen {
+            opacity: 0.5;
+        }
+        .event-header {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .event-details {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 5px;
+        }
+        .event-label {
+            font-weight: bold;
+        }
+        .seen-toggle {
+            margin-bottom: 10px;
+        }
+        #pauseButton {
+            margin-bottom: 10px;
+            padding: 5px 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        #pauseButton.paused {
+            background-color: #f44336;
+        }
+    </style>
+</head>
+<body>
+    <h1>Wikimedia Event Stream Monitor</h1>
+    <div id="filters">
+        <label>
+            Domain:
+            <input type="text" id="domainFilter" placeholder="e.g., en.wikipedia.org">
+        </label>
+        <label>
+            Namespace:
+            <input type="number" id="namespaceFilter" placeholder="e.g., 0 for main">
+        </label>
+        <label>
+            <input type="checkbox" id="minorFilter"> Minor edits only
+        </label>
+        <label>
+            <input type="checkbox" id="botFilter"> Bot edits only
+        </label>
+        <label>
+            <input type="checkbox" id="anonymousFilter"> Anonymous edits only
+        </label>
+        <label>
+            Title regex:
+            <input type="text" id="titleRegexFilter" placeholder="e.g., ^User:">
+        </label>
+        <button id="applyFilters">Apply Filters</button>
+    </div>
+    <div class="seen-toggle">
+        <label>
+            <input type="checkbox" id="hideSeenToggle"> Hide seen entries
+        </label>
+    </div>
+    <button id="pauseButton">Pause</button>
+    <ul id="eventList"></ul>
+
+    <script>
+        const MAX_EVENTS = 1000; // Maximum number of events to store
+        const DISPLAY_EVENTS = 50; // Number of events to display
+
+        let eventBuffer = [];
+        let currentIndex = 0;
+        const eventList = document.getElementById('eventList');
+        const eventSource = new EventSource('https://stream.wikimedia.org/v2/stream/recentchange');
+
+        // Filter elements
+        const domainFilter = document.getElementById('domainFilter');
+        const namespaceFilter = document.getElementById('namespaceFilter');
+        const minorFilter = document.getElementById('minorFilter');
+        const botFilter = document.getElementById('botFilter');
+        const anonymousFilter = document.getElementById('anonymousFilter');
+        const titleRegexFilter = document.getElementById('titleRegexFilter');
+        const applyFiltersButton = document.getElementById('applyFilters');
+        const hideSeenToggle = document.getElementById('hideSeenToggle');
+        const pauseButton = document.getElementById('pauseButton');
+
+        let isPaused = false;
+
+        eventSource.onmessage = function(event) {
+            try {
+                const data = JSON.parse(event.data);
+                addEvent(data);
+                if (!isPaused) {
+                    applyFilters();
+                }
+            } catch (error) {
+                console.error('Error parsing JSON:', error);
+            }
+        };
+
+        eventSource.onerror = function(error) {
+            console.error('EventSource failed:', error);
+        };
+
+        function addEvent(event) {
+            event.seen = false; // Add 'seen' property to each event
+            if (eventBuffer.length < MAX_EVENTS) {
+                eventBuffer.push(event);
+            } else {
+                eventBuffer[currentIndex] = event;
+                currentIndex = (currentIndex + 1) % MAX_EVENTS;
+            }
+        }
+
+        function applyFilters() {
+            const domain = domainFilter.value.toLowerCase();
+            const namespace = namespaceFilter.value ? parseInt(namespaceFilter.value) : null;
+            const minor = minorFilter.checked;
+            const bot = botFilter.checked;
+            const anonymous = anonymousFilter.checked;
+            const titleRegex = titleRegexFilter.value ? new RegExp(titleRegexFilter.value, 'i') : null;
+            const hideSeen = hideSeenToggle.checked;
+
+            const filteredEvents = eventBuffer.filter(event => {
+                if (domain && !event.server_name.toLowerCase().includes(domain)) return false;
+                if (namespace !== null && event.namespace !== namespace) return false;
+                if (minor && !event.minor) return false;
+                if (bot && !event.bot) return false;
+                if (anonymous && event.user_is_anon !== undefined && !event.user_is_anon) return false;
+                if (titleRegex && !titleRegex.test(event.title)) return false;
+                if (hideSeen && event.seen) return false;
+                return true;
+            });
+
+            displayEvents(filteredEvents.slice(-DISPLAY_EVENTS));
+        }
+
+        function displayEvents(events) {
+            eventList.innerHTML = '';
+            events.forEach(displayEvent);
+        }
+
+        function displayEvent(event) {
+            const li = document.createElement('li');
+            li.className = 'event';
+            if (event.seen) {
+                li.classList.add('seen');
+            }
+
+            const header = document.createElement('div');
+            header.className = 'event-header';
+            header.textContent = `${event.type} - ${event.title}`;
+            li.appendChild(header);
+
+            const details = document.createElement('div');
+            details.className = 'event-details';
+            
+            const fields = [
+                { label: 'Type', value: event.type },
+                { label: 'Title', value: `<a href="${event.meta.uri}" target="_blank">${event.title}</a>` },
+                { label: 'User', value: event.user },
+                { label: 'Comment', value: event.comment },
+                { label: 'Timestamp', value: new Date(event.meta.dt).toLocaleString() },
+                { label: 'Bot', value: event.bot ? 'Yes' : 'No' },
+                { label: 'Minor', value: event.minor ? 'Yes' : 'No' },
+                { label: 'Anonymous', value: event.user_is_anon ? 'Yes' : 'No' },
+                { label: 'Old Length', value: event.length?.old },
+                { label: 'New Length', value: event.length?.new },
+                { label: 'Old Revision', value: event.revision?.old },
+                { label: 'New Revision', value: event.revision?.new },
+                { label: 'Server', value: event.server_name },
+                { label: 'Namespace', value: event.namespace },
+                { label: 'Parsed Comment', value: event.parsedcomment },
+                { label: 'Diff', value: `<a href="${event.meta.uri}" target="_blank">View Changes</a>` }
+            ];
+
+            fields.forEach(field => {
+                const label = document.createElement('span');
+                label.className = 'event-label';
+                label.textContent = field.label + ':';
+                details.appendChild(label);
+
+                const value = document.createElement('span');
+                value.innerHTML = field.value !== undefined ? field.value : 'N/A';
+                details.appendChild(value);
+            });
+
+            li.appendChild(details);
+
+            // Add "Seen" checkbox
+            const seenLabel = document.createElement('label');
+            const seenCheckbox = document.createElement('input');
+            seenCheckbox.type = 'checkbox';
+            seenCheckbox.checked = event.seen;
+            seenCheckbox.addEventListener('change', () => {
+                event.seen = seenCheckbox.checked;
+                li.classList.toggle('seen', event.seen);
+                if (hideSeenToggle.checked) {
+                    applyFilters();
+                }
+            });
+            seenLabel.appendChild(seenCheckbox);
+            seenLabel.appendChild(document.createTextNode(' Mark as seen'));
+            li.appendChild(seenLabel);
+
+            eventList.appendChild(li);
+        }
+
+        applyFiltersButton.addEventListener('click', applyFilters);
+        hideSeenToggle.addEventListener('change', applyFilters);
+
+        pauseButton.addEventListener('click', () => {
+            isPaused = !isPaused;
+            pauseButton.textContent = isPaused ? 'Resume' : 'Pause';
+            pauseButton.classList.toggle('paused', isPaused);
+            if (!isPaused) {
+                applyFilters(); // Update the display when resuming
+            }
+        });
+
+        // Initial application of filters
+        applyFilters();
+    </script>
+</body>
+</html>
