@@ -152,16 +152,19 @@
                 if (bot && !event.bot) return false;
                 if (anonymous && event.user_is_anon !== undefined && !event.user_is_anon) return false;
                 if (titleRegex && !titleRegex.test(event.title)) return false;
-                if (hideSeen && event.seen) return false;
                 return true;
             });
 
-            displayEvents(filteredEvents.slice(-DISPLAY_EVENTS));
+            displayEvents(filteredEvents.slice(-DISPLAY_EVENTS), hideSeen);
         }
 
-        function displayEvents(events) {
+        function displayEvents(events, hideSeen) {
             eventList.innerHTML = '';
-            events.forEach(displayEvent);
+            events.forEach(event => {
+                if (!hideSeen || !event.seen) {
+                    displayEvent(event);
+                }
+            });
         }
 
         function displayEvent(event) {
@@ -220,7 +223,7 @@
                 event.seen = seenCheckbox.checked;
                 li.classList.toggle('seen', event.seen);
                 if (hideSeenToggle.checked) {
-                    applyFilters();
+                    li.style.display = event.seen ? 'none' : '';
                 }
             });
             seenLabel.appendChild(seenCheckbox);
@@ -231,7 +234,14 @@
         }
 
         applyFiltersButton.addEventListener('click', applyFilters);
-        hideSeenToggle.addEventListener('change', applyFilters);
+        hideSeenToggle.addEventListener('change', () => {
+            const hideSeen = hideSeenToggle.checked;
+            document.querySelectorAll('#eventList .event').forEach(li => {
+                if (li.classList.contains('seen')) {
+                    li.style.display = hideSeen ? 'none' : '';
+                }
+            });
+        });
 
         pauseButton.addEventListener('click', () => {
             isPaused = !isPaused;
